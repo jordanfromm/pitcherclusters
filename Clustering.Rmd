@@ -1,0 +1,382 @@
+---
+title: "Classifying Pitchers"
+author: "Jordan Fromm"
+date: "1/23/2018"
+output:
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ggplot2)
+library(dplyr)
+library(sqldf)
+library(plotly)
+library(bindrcpp)
+library(coin)
+library(tidyr)
+library(proxy)
+library(vegan)
+library(apcluster)
+library(daff)
+library(compare)
+library(factoextra)
+library(data.table)
+library(plyr)
+library(gtools)
+
+setwd("/Users/JFromm/Desktop/Baseball/Nationals Project")
+```
+
+##Reading Data
+```{r, results = 'hide'}
+
+pitch <- read.csv("n_totalpitch.csv")
+speed <- read.csv("allpitch_s.csv")
+bytype <- read.csv("allpitch.csv")
+```
+
+##Creating Pitch Vector Table
+```{r, results = 'hide'}
+pitch_prop <- full_join(pitch, bytype, by = "pitcher", all.x = TRUE, all.y = TRUE)
+colnames(pitch_prop)[4] <- "ind_pitch"
+colnames(pitch_prop)[2] <- "total_pitch"
+pitch_prop <- sqldf("select * from pitch_prop where ind_pitch >= 20")
+pitch_prop$prop <- round(pitch_prop$ind_pitch / pitch_prop$total_pitch, 3)
+
+pitch_prop <- pitch_prop %>% filter(pitch_type != "FO" & pitch_type != "UN" & pitch_type != "IN" & pitch_type != "PO" & pitch_type != "FA" & pitch_type != "SC")
+pitch_prop <- pitch_prop[c(1,3,5)]
+```
+
+```{r, results = 'hide'}
+speed <- speed %>% filter(avg_speed != "NULL") %>% filter(pitch_type != "NULL")
+speed <- speed %>% filter(pitch_type != "FO" & pitch_type != "UN" & pitch_type != "IN" & pitch_type != "PO" & pitch_type != "AB")
+colnames(speed)[3] <- "speed"
+```
+
+```{r, results = 'hide'}
+
+t_CH <- pitch_prop %>% filter(pitch_type == "CH") %>% select(pitcher, prop)
+s_CH <- speed %>% filter(pitch_type == "CH") %>% select(pitcher, speed)
+CH <- full_join(t_CH, s_CH, by = "pitcher")
+CH <- na.omit(CH)
+
+t_CU <- pitch_prop %>% filter(pitch_type == "CU") %>% select(pitcher, prop)
+s_CU <- speed %>% filter(pitch_type == "CU") %>% select(pitcher, speed)
+CU <- full_join(t_CU, s_CU, by = "pitcher")
+CU <- na.omit(CU)
+
+t_EP <- pitch_prop %>% filter(pitch_type == "EP") %>% select(pitcher, prop)
+s_EP <- speed %>% filter(pitch_type == "EP") %>% select(pitcher, speed)
+EP <- full_join(t_EP, s_EP, by = "pitcher")
+EP <- na.omit(EP)
+
+t_FC <- pitch_prop %>% filter(pitch_type == "FC") %>% select(pitcher, prop)
+s_FC <- speed %>% filter(pitch_type == "FC") %>% select(pitcher, speed)
+FC <- full_join(t_FC, s_FC, by = "pitcher")
+FC <- na.omit(FC)
+
+t_FF <- pitch_prop %>% filter(pitch_type == "FF") %>% select(pitcher, prop)
+s_FF <- speed %>% filter(pitch_type == "FF") %>% select(pitcher, speed)
+FF <- full_join(t_FF, s_FF, by = "pitcher")
+FF <- na.omit(FF)
+
+t_FS <- pitch_prop %>% filter(pitch_type == "FS") %>% select(pitcher, prop)
+s_FS <- speed %>% filter(pitch_type == "FS") %>% select(pitcher, speed)
+FS <- full_join(t_FS, s_FS, by = "pitcher")
+FS <- na.omit(FS)
+
+t_FT <- pitch_prop %>% filter(pitch_type == "FT") %>% select(pitcher, prop)
+s_FT <- speed %>% filter(pitch_type == "FT") %>% select(pitcher, speed)
+FT <- full_join(t_FT, s_FT, by = "pitcher")
+FT <- na.omit(FT)
+
+t_KC <- pitch_prop %>% filter(pitch_type == "KC") %>% select(pitcher, prop)
+s_KC <- speed %>% filter(pitch_type == "KC") %>% select(pitcher, speed)
+KC <- full_join(t_KC, s_KC, by = "pitcher")
+KC <- na.omit(KC)
+
+t_KN <- pitch_prop %>% filter(pitch_type == "KN") %>% select(pitcher, prop)
+s_KN <- speed %>% filter(pitch_type == "KN") %>% select(pitcher, speed)
+KN <- full_join(t_KN, s_KN, by = "pitcher")
+KN <- na.omit(KN)
+
+t_SI <- pitch_prop %>% filter(pitch_type == "SI") %>% select(pitcher, prop)
+s_SI <- speed %>% filter(pitch_type == "SI") %>% select(pitcher, speed)
+SI <- full_join(t_SI, s_SI, by = "pitcher")
+SI <- na.omit(SI)
+
+t_SL <- pitch_prop %>% filter(pitch_type == "SL") %>% select(pitcher, prop)
+s_SL <- speed %>% filter(pitch_type == "SL") %>% select(pitcher, speed)
+SL <- full_join(t_SL, s_SL, by = "pitcher")
+SL <- na.omit(SL)
+```
+
+
+```{r, warning=FALSE}
+pitch_vector <- Reduce(function(x,y) merge(x,y, by = "pitcher", all = TRUE), list(CH, CU, EP, FC, FF, FS, FT, KC, KN, SI, SL))
+colnames(pitch_vector) <- c("pitcher", "prop_CH", "speed_CH", "prop_CU", "speed_CU", "prop_EP", "speed_EP", "prop_FC", "speed_FC", "prop_FF", "speed_FF", "prop_FS", "speed_FS", "prop_FT", "speed_FT", "prop_KC", "speed_KC", "prop_KN", "speed_KN", "prop_SI", "speed_SI", "prop_SL", "speed_SL")
+```
+
+**Cleaning The Data**
+```{r, results = 'hide'}
+pitch_vector$pitcher <- as.factor(pitch_vector$pitcher)
+
+for (i in names(pitch_vector[,c(3,5,7,9,11,13,15,17,19,21,23)])){
+  pitch_vector[[i]] <- as.numeric(as.character(pitch_vector[[i]]))
+}
+
+pitch_vector[is.na(pitch_vector)] <- 0
+```
+
+##Get Pitcher Information
+```{r, warning=FALSE}
+batter <- read.csv("playerid.csv")
+colnames(batter) <- c("batter", "lastName", "firstName", "Pos", "team")
+
+pitchers <- read.csv("pitchers.csv")
+colnames(pitchers) <- c("pitcher", "name")
+pitchers$pitcher <- as.factor(pitchers$pitcher)
+pitchers$name <- as.character(pitchers$name)
+pitch_vector <- merge(pitch_vector, pitchers, by = "pitcher")
+pitch_vector <- pitch_vector[!duplicated(pitch_vector),]
+
+batter2 <- batter %>% filter(Pos != "P")
+colnames(batter2)[1] <- "pitcher"
+
+test3 <- merge(batter2, pitch_vector, all = TRUE)
+pitch_vector <- subset(test3, is.na(test3["lastName"]))
+pitch_vector <- pitch_vector[!(pitch_vector$pitcher==test3$pitcher), ]
+pitch_vector <- pitch_vector[-c(2:5)]
+
+```
+
+
+##Hierarchical Clustering Tree
+```{r}
+pitch_vector <- pitch_vector %>% filter(name != "NULL")
+test <- pitch_vector[1:30, ]
+test_clust <- hclust(dist(test[, 2:23], method = "euclidean"))
+plot(test_clust, labels = test$name, hang = -1)
+
+cluster <- hclust(dist(pitch_vector[, 2:23], method = "euclidean"))
+plot(cluster, labels = pitch_vector$pitcher, hang = -1)
+```
+
+##K Means Clustering
+```{r, results='hide'}
+set.seed(123)
+fviz_nbclust(pitch_vector[, 2:23], kmeans, method = "wss")
+fviz_nbclust(pitch_vector[, 2:23], kmeans, method = "silhouette")
+
+pitchcluster <- kmeans(pitch_vector[, 2:23], 8, nstart = 20)
+pitchcluster
+final <- data.frame(pitchcluster$cluster, pitch_vector$pitcher)
+```
+##Setting Up Pitch Cluster Data
+
+**Pitcher vs. Hitter**
+```{r, results = 'hide', warning=FALSE}
+pvh <- read.csv("newpvh.csv")
+
+pvh <- pvh %>%
+  mutate(uBB = ifelse(event == "Walk", 1, 0)) %>%
+  mutate(IBB = ifelse(event == "Intent Walk", 1, 0)) %>%
+  mutate(HBP = ifelse(event == "Hit By Pitch", 1, 0)) %>%
+  mutate(SF = ifelse(event == "Sac Fly", 1, 0)) %>%
+  mutate(Single = ifelse(event == "Single", 1, 0)) %>%
+  mutate(Double = ifelse(event == "Double", 1, 0)) %>%
+  mutate(Triple = ifelse(event == "Triple", 1, 0)) %>%
+  mutate(HR = ifelse(event == "Home Run", 1, 0)) %>%
+  mutate(H = ifelse((Single == 1 | Double == 1 | Triple == 1 | HR == 1), 1, 0)) %>%
+  mutate(AB = ifelse((event != "Field Error" & uBB != 1 & IBB != 1 & HBP != 1 & SF != 1), 1, 0))
+
+colnames(final)[2] <- "pitcher"
+final$pitcher <- as.factor(final$pitcher)
+pvh$pitcher <- as.factor(pvh$pitcher)
+pvh <- full_join(final, pvh, by = "pitcher", all = TRUE)
+pvh <- na.omit(pvh)
+```
+
+```{r, message=FALSE}
+colnames(pvh)[1] <- "cluster"
+clusters <- split(pvh, pvh$cluster)
+list2env(clusters, .GlobalEnv)
+```
+```{r, warning=FALSE}
+final <- full_join(pitch_vector, final, by = "pitcher")
+final <- final[!duplicated(final$pitcher),]
+
+final <- final[c(25, 1, 24, 2:23)]
+colnames(final)[1] <- "cluster"
+#final.dist <- (dist(final[, 4:25]))
+#anosim(final.dist, grouping = final$cluster)
+
+```
+
+##Standout Batters
+
+**Defining the Function**
+```{r}
+standout <- function(variable, clusternum, name){
+  variable <- subset(pvh, cluster == clusternum)
+  variable <- variable[-c(2:3)]
+  
+  variable_PA = sqldf("select batter, count(*) as PA from variable group by batter order by batter")
+  variable_Double = sqldf("select batter, count(*) as Double from variable where Double = 1 group by batter order by batter")
+  variable_Triple = sqldf("select batter, count(*) as Triple from variable where Triple = 1 group by batter order by batter")
+  variable_HR = sqldf("select batter, count(*) as HR from variable where HR = 1 group by batter order by batter")
+  variable_uBB = sqldf("select batter, count(*) as uBB from variable where uBB = 1 group by batter order by batter")
+  variable_IBB = sqldf("select batter, count(*) as IBB from variable where IBB = 1 group by batter order by batter")
+  variable_HBP = sqldf("select batter, count(*) as HBP from variable where HBP = 1 group by batter order by batter")
+  variable_SF = sqldf("select batter, count(*) as SF from variable where SF = 1 group by batter order by batter")
+  variable_BB = sqldf("select batter, count(*) as BB from variable where IBB = 1 or uBB = 1 group by batter order by batter")
+  variable_Single = sqldf("select batter, count(*) as Single from variable where Single = 1 group by batter order by batter")
+  variable_AB = sqldf("select batter, count(*) as AB from variable where AB = 1 group by batter order by batter")
+  variable_H = sqldf("select batter, count(*) as H from variable where H = 1 group by batter order by batter")
+
+  variable <- merge(variable_uBB, variable_HBP, by = "batter", all.x = TRUE, all.y = TRUE)
+  variable <- merge(variable, variable_Single, by = "batter", all.x = TRUE, all.y = TRUE)
+  variable <- merge(variable, variable_Double, by = "batter", all.x = TRUE, all.y = TRUE)
+  variable <- merge(variable, variable_Triple, by = "batter", all.x = TRUE, all.y = TRUE)
+  variable <- merge(variable, variable_HR, by = "batter", all.x = TRUE, all.y = TRUE)
+  variable <- merge(variable, variable_AB, by = "batter", all.x = TRUE, all.y = TRUE)
+  variable <- merge(variable, variable_BB, by = "batter", all.x = TRUE, all.y = TRUE)
+  variable <- merge(variable, variable_IBB, by = "batter", all.x = TRUE, all.y = TRUE)
+  variable <- merge(variable, variable_SF, by = "batter", all.x = TRUE, all.y = TRUE)
+  variable <- merge(variable, variable_PA, by = "batter", all.x = TRUE, all.y = TRUE)
+  variable[is.na(variable)] <- 0
+  
+  variable$wOBA <- round(((variable$uBB*.693) + (variable$HBP*.722) + (variable$Single*.876) + (variable$Double*1.232) + (variable$Triple*1.552) + (variable$HR*1.980))
+                   / (variable$AB + variable$BB - variable$IBB + variable$SF + variable$HBP), 3)
+  variable <- variable %>% filter(PA >= 62.875) %>% select(batter, PA, wOBA)
+  variable$cluster <- clusternum
+  variable <- variable[c(4, 1:3)]
+  variable$rank <- NA
+  order.variable <- order(variable$wOBA, variable$batter, decreasing = TRUE)
+  variable$rank[order.variable] <- 1:nrow(variable)
+  variable <- assign(name, variable, envir = globalenv())
+}
+
+
+```
+
+**Creating Tables for Each Cluster**
+```{r}
+standout(c1,1,"c1")
+standout(c2,2,"c2")
+standout(c3,3,"c3")
+standout(c4,4,"c4")
+standout(c5,5,"c5")
+standout(c6,6,"c6")
+standout(c7,7,"c7")
+standout(c8,8,"c8")
+```
+
+
+**Merging Data Frames**
+
+```{r}
+overall <- Reduce(function(x,y) merge(x,y, all = TRUE), list(c1, c2, c3, c4, c5, c6, c7, c8))
+overall <- na.omit(overall)
+overall <- sqldf("select cluster, batter, PA, wOBA from overall order by batter, cluster")
+```
+```{r}
+players <- inner_join(c1, c2, by = "batter")
+players <- inner_join(players, c3, by = "batter")
+players <- inner_join(players, c4, by = "batter")
+players <- inner_join(players, c5, by = "batter")
+players <- inner_join(players, c6, by = "batter")
+players <- inner_join(players, c7, by = "batter")
+players <- inner_join(players, c8, by = "batter")
+```
+```{r}
+overall <- overall[overall$batter %in% players$batter,]
+```
+```{r}
+maxwOBA <- sqldf("select batter, max(wOBA) as max_wOBA from overall group by batter")
+minwOBA <- sqldf("select batter, min(wOBA) as min_wOBA from overall group by batter")
+maxmin <- merge(maxwOBA, minwOBA)
+maxmin$range <- maxmin$max_wOBA-maxmin$min_wOBA
+maxmin <- maxmin[c(1, 4)]
+
+meanwOBA <- sqldf("select batter, avg(wOBA) as mean_wOBA from overall group by batter")
+meanmin <- merge(meanwOBA, minwOBA)
+meanmin$diff <- round(meanmin$mean_wOBA-meanmin$min_wOBA, 3)
+meanmin <- meanmin[c(1,4)]
+
+plot_data <- merge(maxmin, meanmin)
+plot_data$total <- plot_data$range + plot_data$diff
+plot_data$rank <- NA
+plot.order <- order(plot_data$total, plot_data$batter, decreasing = TRUE)
+plot_data$rank[plot.order] <- 1:nrow(plot_data)
+
+plot_data2 <- merge(maxmin, meanwOBA)
+plot_data2$mean_wOBA <- round(plot_data2$mean_wOBA, 3)
+colnames(plot_data2)[3] <- "mean"
+plot_data2$total <- plot_data2$range + plot_data2$mean
+plot_data2$rank <- NA
+plot2.order <- order(plot_data2$total, plot_data2$batter, decreasing = TRUE)
+plot_data2$rank[plot2.order] <- 1:nrow(plot_data2)
+```
+```{r}
+newplot <- ggplot(plot_data, aes(x = range, y = diff)) +
+  geom_point() +
+  labs(x = "Range", y = "Mean - Min")
+ggplotly(newplot)
+```
+```{r, message=FALSE, warning=FALSE}
+newplot2 <- ggplot(plot_data2, aes(x = range, y = mean)) +
+  geom_point() +
+  labs(x = "Range", y = "Mean") +
+  geom_segment(aes(x = 0, xend = quantile(plot_data2$range, 0.1), y = quantile(plot_data2$mean, 0.1), yend = quantile(plot_data2$mean, 0.1))) +
+  geom_segment(aes(x = quantile(plot_data2$range, 0.1), xend = quantile(plot_data2$range, 0.1), y = 0.25, yend = quantile(plot_data2$mean, 0.1))) +
+  geom_segment(x = 0, xend = quantile(plot_data2$range, 0.1), y = quantile(plot_data2$mean, 0.9), yend = quantile(plot_data2$mean, 0.9)) +
+  geom_segment(aes(x = quantile(plot_data2$range, 0.1), xend = quantile(plot_data2$range, 0.1), y = quantile(plot_data2$mean, 0.9), yend = 0.45)) +
+  geom_segment(aes(x = quantile(plot_data2$range, 0.9), xend = 0.25, y = quantile(plot_data2$mean, 0.9), yend = quantile(plot_data2$mean, 0.9))) + 
+  geom_segment(aes(x = quantile(plot_data2$range, 0.9), xend = quantile(plot_data2$range, 0.9), y = quantile(plot_data2$mean, 0.9), yend = 0.45)) +
+  geom_segment(aes(x = quantile(plot_data2$range, 0.9), xend = 0.25, y = quantile(plot_data2$mean, 0.1), yend = quantile(plot_data2$mean, 0.1))) +
+  geom_segment(aes(x = quantile(plot_data2$range, 0.9), xend = quantile(plot_data2$range, 0.9), y = 0.25, yend = quantile(plot_data2$mean, 0.1))) +
+  ggtitle("Batter Mean wOBA vs. Range of wOBA \n (Amongst All Clusters)") +
+  theme(plot.title = element_text(hjust = 0.5))
+ggplotly(newplot2)
+```
+
+**Correlation**
+```{r, comment = NA}
+correlation <- Reduce(function(x,y) merge(x,y, all = TRUE), list(c1, c2, c3, c4, c5, c6, c7, c8))
+correlation <- correlation[correlation$batter %in% overall$batter,]
+correlation <- as.data.table(correlation)
+correlation$cluster <- as.character(correlation$cluster)
+correlation <- correlation[,c(1,5)]
+
+setkey(correlation, "cluster")
+clust = unique(correlation$cluster)
+nclust = length(clust)
+pairs = combinations(nclust,2,clust)
+
+p1 <- correlation[pairs[,1],,allow.cartesian = TRUE]
+p2 <- correlation[pairs[,2],,allow.cartesian = TRUE]
+correlation <- p1[, c("clust2", "rank2"):= p2]
+correlation <- p1[,cor(rank, rank2), by = list(cluster, clust2)]
+colnames(correlation) <- c("clusterA", "clusterB", "cor")
+correlation
+```
+
+**Interesting Players**
+```{r}
+bathand <- read.csv("batterwithhand.csv")
+colnames(bathand) <- c("batter", "name", "stand")
+bathand <- merge(batter, bathand, by = "batter")
+bathand <- bathand[,-c(5:6)]
+
+topleft <- sqldf("select * from plot_data2 where mean >= 0.357 and range <= 0.066")
+topright <- sqldf("select * from plot_data2 where range >= 0.164 and mean >= 0.357")
+bottomright <- sqldf("select * from plot_data2 where mean <= 0.291 and range >= 0.164")
+
+topleft <- merge(topleft, bathand, by = "batter")
+topright <- merge(topright, bathand, by = "batter")
+bottomright <- merge(bottomright, bathand, by = "batter")
+```
